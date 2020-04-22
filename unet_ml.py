@@ -34,22 +34,6 @@ print (exp_name)
 parser = argparse.ArgumentParser()
 parser.add_argument('--lr', type=float, default=1e-3)
 args= parser.parse_args()
-class SCN1(nn.Module):
-    def __init__(self):
-        nn.Module.__init__(self)
-        self.sparseModel = scn.Sequential().add(
-           scn.InputLayer(data.dimension,data.full_scale, mode=4)).add(
-           scn.SubmanifoldConvolution(data.dimension, 3, m, 3, False)).add(
-               scn.UNet(data.dimension, block_reps, [m, 2*m, 3*m, 4*m, 5*m, 6*m, 7*m], residual_blocks)).add(
-           scn.BatchNormReLU(m)).add(
-           scn.OutputLayer(data.dimension))
-        self.linear = nn.Linear(m, num_classes)
-    def forward(self,x):
-        fv=self.sparseModel(x)
-        
-        y=self.linear(fv)
-        #fv = F.normalize(fv, p=2, dim=1)
-        return fv, y
 
 class SCN(nn.Module):
     def __init__(self):
@@ -71,10 +55,6 @@ class SCN(nn.Module):
 class RefNet(nn.Module):
 	def __init__(self):
 		nn.Module.__init__(self)
-		self.backbone_model = None
-		#self.model = self.model.cuda()
-		#self.model = nn.DataParallel(self.model)
-		#self.coord_fuse = nn.Sequential(nn.Linear(64+3, 64), nn.ReLU(), nn.Linear(64, 64), nn.ReLU())
 		self.gru = nn.GRU(input_size=300, hidden_size=256, batch_first=True)
 		#self.feat_fuse = nn.Sequential(nn.Linear(36, 32), nn.ReLU())
 		self.feat_fuse = nn.Sequential(nn.Linear(256, 128), nn.ReLU())
@@ -85,8 +65,6 @@ class RefNet(nn.Module):
 		self.heat_map = nn.Sequential(nn.Linear(128, 2), nn.Dropout())
 		self.gather_func = scn.InputLayer
 	def forward(self, batch, fv):
-		#fv= self.backbone_model(batch['x'])
-		#fv = self.coord_fuse(torch.cat([fv, batch['coords'].float()], 1))	
 		var_loss = 0
 		dis_loss = [0,0]
 		reg_loss = 0
@@ -178,29 +156,18 @@ def checkpoint_restore(model,exp_name,use_cuda=True,epoch=0):
 def is_power2(num):
 	return num != 0 and ((num & (num - 1)) == 0)
 	
-def gen_blocks(coords, block_size, stride):
-    #coords = coords.numpy()
-    Mx, My, _ = coords.max(0)
-    mx, my, _ = coords.min(0)
-    Mx = np.ceil(Mx) - stride
-    My = np.ceil(My) - stride
-    mx = (np.floor(mx) + np.rint(mx))/2
-    my = (np.floor(my) + np.rint(my))/2
-    blocks = [(x,y) for x in np.arange(mx, Mx, stride) for y in np.arange(my, My, stride)]
-    return blocks
-
 def change_lr(optimizer,epoch):
 	p = epoch//50
 	lr = args.lr * (0.1**p)
 	for param_group in optimizer.param_groups:
 		param_group['lr'] = lr
 
-backbone_model = SCN().cuda()
-backbone_model = nn.DataParallel(backbone_model)
 ref_model=RefNet()
 if use_cuda:
     ref_model=ref_model.cuda()
+    backbone_model = SCN().cuda()
 
+backbone_model = nn.DataParallel(backbone_model)
 #model = nn.DataParallel(model)
 training_epochs=512
 #training_epoch=scn.checkpoint_restore(model,exp_name,'unet',use_cuda)
