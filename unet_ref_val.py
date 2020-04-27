@@ -54,14 +54,13 @@ bk_name = exp_name + 'bk_1'
 ref_name = exp_name + 'ref_1'
 
 
-backbone_model = SCN_sem()
+backbone_model = SCN()
 ref_model=RefNet_Val()
 if use_cuda:
 	ref_model=ref_model.cuda()
 	backbone_model = backbone_model.cuda()
 
 backbone_model = nn.DataParallel(backbone_model)
-backbone_model.module.linear = nn.Linear(32, 64).cuda()
 checkpoint_restore(backbone_model,bk_name,use_cuda)
 checkpoint_restore(ref_model,ref_name,use_cuda)
 #sem_optimizer = optim.Adam(unet.parameters())
