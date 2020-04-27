@@ -12,24 +12,6 @@ m = 32
 residual_blocks= True
 block_reps = 2
 
-
-class SCN_sem(nn.Module):
-	def __init__(self):
-		nn.Module.__init__(self)
-		self.sparseModel = scn.Sequential().add(
-			scn.InputLayer(data.dimension,data.full_scale, mode=4)).add(
-			scn.SubmanifoldConvolution(data.dimension, 3, m, 3, False)).add(
-			scn.UNet(data.dimension, block_reps, [m, 2*m, 3*m, 4*m, 5*m, 6*m, 7*m], residual_blocks)).add(
-			scn.BatchNormReLU(m)).add(
-			scn.OutputLayer(data.dimension))
-		self.linear = nn.Linear(m, 20)
-	def forward(self,x):
-		fv=self.sparseModel(x)
-		
-		y=self.linear(fv)
-		#fv = F.normalize(fv, p=2, dim=1)
-		return y
-
 class SCN(nn.Module):
 	def __init__(self):
 		nn.Module.__init__(self)
@@ -121,9 +103,7 @@ class RefNet(nn.Module):
 		return total_loss
 
 def gather_supervox(feat, supvox, get_var=False):
-
-	# Input: 
-	# feat: N, d /  supvox: N, 2
+	# Input:  feat: N, d /  supvox: N, 2
 	# Output: results_f: [(N1,d), (N2, d) ... (NB, d)]
 	gather_func = scn.InputLayer(1, supvox[:,0].max()+1, mode=4)
 	supvox_f = gather_func([supvox, feat])
