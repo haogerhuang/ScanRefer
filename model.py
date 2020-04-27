@@ -173,12 +173,11 @@ class RefNet_Val(nn.Module):
 			overall_feat = self.feat_fuse(torch.cat([supvox_feat_expand, lang_feat_expand], -1))
 			# Num_supervoxels, Num_sentences, 2
 			obj_score = self.heat_map(overall_feat)
+			# Num_supervoxels, Num_sentences
 			obj_score = F.softmax(obj_score, -1).argmax(-1)
 
-			obj_score = obj_score[supervox[idx:idx+num_p]]
-
 			# Num_points, Num_sentences
-			obj_score = supvox_sen_score[supervox[idx:idx+num_p]].long()
+			obj_score = obj_score[supervox[idx:idx+num_p]]
 			# Num_points, Num_sentences
 			gt = batch['ref_lbl'][i].cuda()
 
