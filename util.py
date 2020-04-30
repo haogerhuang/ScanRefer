@@ -25,7 +25,8 @@ def mkpredictions_test(groups, predictions, scene_name, save_dir):
         f.write(f_name+' '+str(NYU_CLASS_IDS[lbl])+' '+str(conf)+'\n')
         num_grp += 1
 
-
+def MS(feat, thres):
+	cluste
 
 def MS_v2(embedding, thres):
 	grps = torch.zeros(embedding.shape[0])-1

@@ -19,7 +19,7 @@ min_size = 5
 MAX_DES_LEN = 30
 GLOVE_PICKLE = 'glove.p'
 
-import torch, numpy as np, glob, math, torch.utils.data, scipy.ndimage, multiprocessing as mp, time, json, pickle
+import torch, numpy as np, glob, math, torch.utils.data, scipy.ndimage, multiprocessing as mp, time, json, pickle, random
 import sparseconvnet as scn
 from graph import *
 
@@ -31,7 +31,15 @@ Voxelize = scn.InputLayer(dimension, full_scale, mode=4)
 Devoxelize = scn.OutputLayer(dimension)
 
 # Class IDs have been mapped to the range {0,1,...,19}
-# NYU_CLASS_IDS = np.array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 24, 28, 33, 34, 36, 39])
+#NYU_CLASS_IDS = np.array([3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 24, 28, 33, 34, 36, 39])
+remap = {}
+
+f = open('labelids.txt', 'r')
+NYU_CLASS_IDS = f.readlines()[2:]
+
+for i, line in enumerate(NYU_CLASS_IDS):
+    obj_name = line.strip().split('\t')[-1]
+    remap[obj_name] = i
 
 train_3d = {}
 supervoxel = {}
@@ -46,7 +54,7 @@ for x in torch.utils.data.DataLoader(
     train_3d[x[1]] = x[0]
 
 for x in torch.utils.data.DataLoader(
-        glob.glob('supervoxel50_f1/*.pth'),
+        glob.glob('supervoxel50_f2/*.pth'),
         collate_fn=load_data, num_workers=mp.cpu_count()):
     supervoxel[x[1]] = x[0]
 print('Training examples:', len(train_3d))
@@ -81,7 +89,6 @@ for i, data in enumerate(scanrefer):
 	
 #loader_list = sorted(list(train_3d.keys()))[0:32]
 loader_list = list(train_3d.keys())
-
 #for i in train_3d.keys():
 #	multiplier = len(lang[i]['idx'])//lang_batch_size + 1
 #	loader_list += [i]*multiplier
@@ -111,9 +118,7 @@ def elastic(x,gran,mag):
 
 def trainMerge(tbl):
     locs=[]
-    locs1=[]
     feats=[]
-    feats1=[]
     labels=[]
     ins_labels=[]
     ref_labels=[]
@@ -123,9 +128,10 @@ def trainMerge(tbl):
     batch_lang_feat=[]
     batch_lang_len=[]
     batch_lang_objID=[]
+    batch_lang_cls=[]
     batch_ref_lbl=[]
     batch_supvox=[]
-    batch_supvox_ins=[]
+    batch_supvox_lbl=[]
     for idx,scene_id in enumerate(tbl):
         
         #scene_id = scanrefer[i]['scene_id']  
@@ -137,44 +143,52 @@ def trainMerge(tbl):
         lang_feat=[]
         lang_len=[]
         lang_objID=[]
-        #if len(refer_idxs) > lang_batch_size:
-        #    refer_idxs = np.random.choice(refer_idxs, lang_batch_size, replace=False)
+        lang_cls=[]
+        #if len(refer_idxs) > 20:
+        #    refer_idxs = np.random.choice(refer_idxs, 20, replace=False)
         for i in refer_idxs:
             scene_id = scanrefer[i]['scene_id']  
             object_id = scanrefer[i]['object_id']
             ann_id = scanrefer[i]['ann_id']
-         
+            object_name = scanrefer[i]['object_name']
             lang_feat.append(torch.from_numpy(lang[scene_id][object_id][ann_id][0])) 
             lang_len.append(min(MAX_DES_LEN, lang[scene_id][object_id][ann_id][1]))
             lang_objID.append(int(object_id))
+            if object_name not in remap:
+                lang_cls.append(-100)
+            else:
+                lang_cls.append(remap[object_name])
         # Obj_num, 30, 300
         lang_feat=torch.stack(lang_feat, 0)
         # Obj_num, 
         lang_len = np.array(lang_len).astype(np.int64)
         # Obj_num, 
         lang_objID=torch.LongTensor(lang_objID)
+        lang_cls=torch.LongTensor(lang_cls)
+
         batch_lang_feat.append(lang_feat)
         batch_lang_len.append(lang_len)
         batch_lang_objID.append(lang_objID)
- 
+        batch_lang_cls.append(lang_cls) 
         
         a,b,c,d=train_3d[scene_id]
-        a1 = a.copy()
         #print (c.shape)
         #print (d.shape)
         #print (c.dtype)
         #print (d.dtype)
         
+        #m=np.eye(3)+np.random.randn(3,3)*0.1
+        coord = a
         m=np.eye(3)+np.random.randn(3,3)*0.1
-        m1=np.eye(3)
+        #m1=np.eye(3)
         m[0][0]*=np.random.randint(0,2)*2-1
         m*=scale
-        m1*=scale1
+        #m1*=scale1
         theta=np.random.rand()*2*math.pi
         m=np.matmul(m,[[math.cos(theta),math.sin(theta),0],[-math.sin(theta),math.cos(theta),0],[0,0,1]])
         a=np.matmul(a,m)
-        m1=np.matmul(m1,[[math.cos(theta),math.sin(theta),0],[-math.sin(theta),math.cos(theta),0],[0,0,1]])
-        a1=np.matmul(a1,m1)
+        #m1=np.matmul(m1,[[math.cos(theta),math.sin(theta),0],[-math.sin(theta),math.cos(theta),0],[0,0,1]])
+        #a1=np.matmul(a1,m1)
         
         #a *= scale 
         #coord = a/scale
@@ -187,11 +201,12 @@ def trainMerge(tbl):
         offset=-m+np.clip(full_scale-M+m-0.001,0,None)*np.random.rand(3)+np.clip(full_scale-M+m+0.001,None,0)*np.random.rand(3)
         a+=offset
         idxs=(a.min(1)>=0)*(a.max(1)<full_scale)
-        coord=a.copy()
         a=a[idxs]
         b=b[idxs]
         c=c[idxs]
         d=d[idxs]
+        coord = coord[idxs]
+        coord = -1 + 2*(coord-coord.min(0)[0])/(coord.max(0)[0]-coord.min(0)[0])
         a=torch.from_numpy(a).long()
         locs.append(torch.cat([a,torch.LongTensor(a.shape[0],1).fill_(idx)],1))
         feats.append(torch.from_numpy(b)+torch.randn(3)*0.1)
@@ -206,14 +221,16 @@ def trainMerge(tbl):
 
         # Label
         # Num_points, Supvox_num
-        spvox, spvox_ins = supervoxel[scene_id]
-        spvox = torch.from_numpy(spvox)
-        spvox_ins = torch.from_numpy(spvox_ins)
+        spvox, spvox_ins, spvox_sem = supervoxel[scene_id]
+        spvox = torch.from_numpy(spvox).long().unsqueeze(-1)
+        spvox_ins = torch.from_numpy(spvox_ins).long()
+        spvox_sem = torch.from_numpy(spvox_sem).long()
         #ref_lbl = (ins_labels[-1].unsqueeze(-1)-1) == lang_objID
         ref_lbl = spvox_ins.unsqueeze(-1) == lang_objID
         # Supvox_num, Obj_num,
         batch_ref_lbl.append(ref_lbl.long())
-        batch_supvox.append([spvox, spvox_ins])
+        batch_supvox.append(torch.cat([spvox, torch.zeros_like(spvox)+idx],-1))
+        batch_supvox_lbl.append([spvox_ins, spvox_sem])
     locs=torch.cat(locs,0)
     #locs1=torch.cat(locs1,0)
     feats=torch.cat(feats,0)
@@ -221,6 +238,7 @@ def trainMerge(tbl):
     labels=torch.cat(labels,0)
     ins_labels=torch.cat(ins_labels,0)
     coords = torch.cat(coords,0)
+    batch_supvox = torch.cat(batch_supvox,0)
     batch_data = {'x': [locs,feats],
                   'y': labels.long(),
                   'id': tbl,
@@ -231,7 +249,8 @@ def trainMerge(tbl):
                   'lang_feat': batch_lang_feat,
                   'lang_len': batch_lang_len,
                   'lang_objID': batch_lang_objID,
-                  'supvox': batch_supvox,
+                  'lang_cls': batch_lang_cls,
+                  'supvox': [batch_supvox,batch_supvox_lbl],
                   'ref_lbl': batch_ref_lbl} 
     return batch_data
 
